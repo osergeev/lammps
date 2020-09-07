@@ -16,24 +16,22 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_tersoff.h"
-#include <mpi.h>
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
-#include "atom.h"
-#include "neighbor.h"
-#include "neigh_list.h"
-#include "neigh_request.h"
-#include "force.h"
-#include "comm.h"
-#include "memory.h"
-#include "error.h"
-#include "utils.h"
-#include "tokenizer.h"
-#include "potential_file_reader.h"
 
+#include "atom.h"
+#include "comm.h"
+#include "error.h"
+#include "force.h"
 #include "math_const.h"
 #include "math_special.h"
+#include "memory.h"
+#include "neigh_list.h"
+#include "neigh_request.h"
+#include "neighbor.h"
+#include "potential_file_reader.h"
+#include "tokenizer.h"
+
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -49,6 +47,7 @@ PairTersoff::PairTersoff(LAMMPS *lmp) : Pair(lmp)
   restartinfo = 0;
   one_coeff = 1;
   manybody_flag = 1;
+  unit_convert_flag = utils::get_supported_conversions(utils::ENERGY);
 
   nelements = 0;
   elements = NULL;
@@ -400,12 +399,17 @@ void PairTersoff::read_file(char *file)
   // open file on proc 0
 
   if (comm->me == 0) {
-    PotentialFileReader reader(lmp, file, "Tersoff");
-    char * line;
+    PotentialFileReader reader(lmp, file, "tersoff", unit_convert_flag);
+    char *line;
 
+    // transparently convert units for supported conversions
+
+    int unit_convert = reader.get_unit_convert();
+    double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
+                                                            unit_convert);
     while((line = reader.next_line(NPARAMS_PER_LINE))) {
       try {
-        ValueTokenizer values(line, " \t\n\r\f");
+        ValueTokenizer values(line);
 
         std::string iname = values.next_string();
         std::string jname = values.next_string();
@@ -426,13 +430,17 @@ void PairTersoff::read_file(char *file)
           if (kname == elements[kelement]) break;
         if (kelement == nelements) continue;
 
-
         // load up parameter settings and error check their values
 
         if (nparams == maxparam) {
           maxparam += DELTA;
           params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
                                               "pair:params");
+
+          // make certain all addional allocated storage is initialized
+          // to avoid false positives when checking with valgrind
+
+          memset(params + nparams, 0, DELTA*sizeof(Param));
         }
 
         params[nparams].ielement  = ielement;
@@ -453,6 +461,11 @@ void PairTersoff::read_file(char *file)
         params[nparams].lam1      = values.next_double();
         params[nparams].biga      = values.next_double();
         params[nparams].powermint = int(params[nparams].powerm);
+
+        if (unit_convert) {
+          params[nparams].biga *= conversion_factor;
+          params[nparams].bigb *= conversion_factor;
+        }
       } catch (TokenizerException & e) {
         error->one(FLERR, e.what());
       }
@@ -524,10 +537,14 @@ void PairTersoff::setup_params()
     params[m].cut = params[m].bigr + params[m].bigd;
     params[m].cutsq = params[m].cut*params[m].cut;
 
-    params[m].c1 = pow(2.0*params[m].powern*1.0e-16,-1.0/params[m].powern);
-    params[m].c2 = pow(2.0*params[m].powern*1.0e-8,-1.0/params[m].powern);
-    params[m].c3 = 1.0/params[m].c2;
-    params[m].c4 = 1.0/params[m].c1;
+    if (params[m].powern > 0.0) {
+      params[m].c1 = pow(2.0*params[m].powern*1.0e-16,-1.0/params[m].powern);
+      params[m].c2 = pow(2.0*params[m].powern*1.0e-8,-1.0/params[m].powern);
+      params[m].c3 = 1.0/params[m].c2;
+      params[m].c4 = 1.0/params[m].c1;
+    } else {
+      params[m].c1 = params[m].c2 = params[m].c3 = params[m].c4 = 0.0;
+    }
   }
 
   // set cutmax to max of all params

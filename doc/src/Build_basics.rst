@@ -115,12 +115,12 @@ self-installed MPICH or OpenMPI, so you should study the provided
 documentation to find out how to build and link with it.
 
 The majority of OpenMP (threading) support in LAMMPS is provided by the
-``USER-OMP`` package; see the :doc:`Speed omp <Speed_omp>` doc page for
-details. The ``USER-INTEL`` package also includes OpenMP threading (it
-is compatible with ``USER-OMP`` and will usually fall back on styles
-from that package, if a ``USER-INTEL`` does not exist) and adds
-vectorization support when compiled with compatible compilers, in
-particular the Intel compilers on top of OpenMP. Also, the ``KOKKOS``
+``USER-OMP`` package; see the :doc:`Speed_omp`
+page for details. The ``USER-INTEL`` package also includes OpenMP
+threading (it is compatible with ``USER-OMP`` and will usually fall
+back on styles from that package, if a ``USER-INTEL`` does not exist)
+and adds vectorization support when compiled with compatible compilers,
+in particular the Intel compilers on top of OpenMP. Also, the ``KOKKOS``
 package can be compiled to include OpenMP threading.
 
 In addition, there are a few commands in LAMMPS that have native OpenMP
@@ -193,14 +193,17 @@ compiler and any :doc:`accelerator packages <Speed_packages>` you have
 included in the build.
 
 You can tell CMake to look for a specific compiler with setting CMake
-variable during configuration.  For a few common choices, there are also
-presets in the ``cmake/presets`` folder.  For convenience, there is a
-``CMAKE_TUNE_FLAGS`` variable that can be set to apply global compiler
-options.  More on that below, but you can also specify the corresponding
-``CMAKE_*_FLAGS`` variables individually if you want to experiment with
-alternate optimization flags.  You should specify all 3 compilers, so
-that the (few) LAMMPS source files written in C or Fortran are built
-with a compiler consistent with the one used for the C++ files:
+variables (listed below) during configuration.  For a few common
+choices, there are also presets in the ``cmake/presets`` folder.  For
+convenience, there is a ``CMAKE_TUNE_FLAGS`` variable that can be set to
+apply global compiler options (applied to compilation only), to be used
+for adding compiler or host specific optimization flags in addition to
+the "flags" variables listed below. You may also specify the
+corresponding ``CMAKE_*_FLAGS`` variables individually, if you want to
+experiment with alternate optimization flags.  You should specify all 3
+compilers, so that the (few) LAMMPS source files written in C or Fortran
+are built with a compiler consistent with the one used for the C++
+files:
 
 .. code-block:: bash
 
@@ -225,15 +228,11 @@ A few example command lines are:
 
 For compiling with the Clang/LLVM compilers a CMake preset is provided that
 can be loaded with `-C ../cmake/presets/clang.cmake`.  Similarly,
-`-C ../cmake/presets/intel.cmake` should switch the 
+`-C ../cmake/presets/intel.cmake` should switch the
 
 In addition you can set ``CMAKE_TUNE_FLAGS`` to specifically add
 compiler flags to tune for optimal performance on given hosts. By
-default these are initialized to some compiler specific flags, to
-optimize the LAMMPS executable with optimizations and instructions
-available on the host where LAMMPS is compiled. For example, for Intel
-compilers this would be ``-xHost`` and for GNU compilers this would be
-``-march=native``. To turn these flags off, do ``-D CMAKE_TUNE_FLAGS=``.
+default this variable is empty.
 
 .. note::
 
@@ -291,13 +290,13 @@ Serial build with GNU gcc (see ``src/MAKE/Makefile.serial``):
    compiler that supports C++11; either as a binary package or through
    compiling from source.
 
-If you build LAMMPS with any :doc:`accelerator packages
-<Speed_packages>` included, there may be specific optimization flags
+If you build LAMMPS with any :doc:`Speed_packages` included, there may
+be specific compiler or linker flags
 that are either required or recommended to enable required features and
 to achieve optimal performance.  You need to include these in the
 CCFLAGS and LINKFLAGS settings above.  For details, see the individual
-package doc pages listed on the :doc:`Speed packages <Speed_packages>`
-doc page.  Or examine these files in the src/MAKE/OPTIONS directory.
+package doc pages listed on the :doc:`Speed_packages`
+page.  Or examine these files in the src/MAKE/OPTIONS directory.
 They correspond to each of the 5 accelerator packages and their hardware
 variants:
 
@@ -372,7 +371,8 @@ it.  The build step will also create generic soft links, named
 ``liblammps.a`` and ``liblammps.so``\ , which point to the specific
 ``liblammps_machine.a/so`` files.
 
-**CMake and make info**\ :
+CMake and make info
+^^^^^^^^^^^^^^^^^^^
 
 Note that for creating a shared library, all the libraries it depends on
 must be compiled to be compatible with shared libraries.  This should be
@@ -418,7 +418,7 @@ recommended to ensure the integrity of the system software installation.
 
 .. _debug:
 
-Excluding or removing debug support
+Including or removing debug support
 -----------------------------------
 
 By default the compilation settings will include the *-g* flag which
@@ -460,9 +460,10 @@ python packages are installed into that virtual environment via the pip
 tool.  The actual translation is then done via make commands.
 
 .. _rst: https://docutils.readthedocs.io/en/sphinx-docs/user/rst/quickstart.html
-.. _sphinx: https://sphinx-doc.org
+.. _sphinx: https://www.sphinx-doc.org
 
-**Documentation make option**\ :
+Documentation make option
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following make commands can be issued in the doc folder of the
 LAMMPS source distribution.
@@ -470,7 +471,7 @@ LAMMPS source distribution.
 .. code-block:: bash
 
   make html          # create HTML doc pages in html directory
-  make pdf           # create Developer.pdf and Manual.pdf in this directory
+  make pdf           # create Manual.pdf in this directory
   make fetch         # fetch HTML and PDF files from LAMMPS web site
   make clean         # remove all intermediate files
   make clean-all     # reset the entire doc build environment
@@ -489,7 +490,8 @@ your system.
    current LAMMPS version (HTML and PDF files), from the website
    `download page <https://lammps.sandia.gov/download.html>`_.
 
-**CMake build option**\ :
+CMake build option
+^^^^^^^^^^^^^^^^^^
 
 It is also possible to create the HTML version of the manual within
 the :doc:`CMake build directory <Build_cmake>`.  The reason for this
@@ -512,7 +514,8 @@ Build LAMMPS tools
 Some tools described in :doc:`Auxiliary tools <Tools>` can be built directly
 using CMake or Make.
 
-**CMake build3**\ :
+CMake build
+^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -521,7 +524,8 @@ using CMake or Make.
 The generated binaries will also become part of the LAMMPS installation
 (see below).
 
-**Traditional make**\ :
+Traditional make
+^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -545,7 +549,8 @@ a globally visible place on your system, for others to access.  Note
 that you may need super-user privileges (e.g. sudo) if the directory
 you want to copy files to is protected.
 
-**CMake build**\ :
+CMake build
+^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -553,7 +558,8 @@ you want to copy files to is protected.
    make                        # perform make after CMake command
    make install                # perform the installation into prefix
 
-**Traditional make**\ :
+Traditional make
+^^^^^^^^^^^^^^^^
 
 There is no "install" option in the ``src/Makefile`` for LAMMPS.  If
 you wish to do this you will need to first build LAMMPS, then manually

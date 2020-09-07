@@ -12,13 +12,7 @@
 ------------------------------------------------------------------------- */
 
 #include "lammps.h"
-#include <mpi.h>
-#include <cmath>
-#include <cstring>
-#include <cstdlib>
-#include <cctype>
-#include <map>
-#include <string>
+
 #include "style_angle.h"     // IWYU pragma: keep
 #include "style_atom.h"      // IWYU pragma: keep
 #include "style_bond.h"      // IWYU pragma: keep
@@ -36,12 +30,12 @@
 #include "universe.h"
 #include "input.h"
 #include "info.h"
-#include "atom.h"
+#include "atom.h"            // IWYU pragma: keep
 #include "update.h"
-#include "neighbor.h"
+#include "neighbor.h"        // IWYU pragma: keep
 #include "comm.h"
 #include "comm_brick.h"
-#include "domain.h"
+#include "domain.h"          // IWYU pragma: keep
 #include "force.h"
 #include "modify.h"
 #include "group.h"
@@ -54,8 +48,11 @@
 #include "version.h"
 #include "memory.h"
 #include "error.h"
-#include "utils.h"
-#include "fmt/format.h"
+
+#include <cctype>
+#include <cmath>
+#include <cstring>
+#include <map>
 
 #include "lmpinstalledpkgs.h"
 #include "lmpgitversion.h"
@@ -335,7 +332,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
         error->universe_all(FLERR,"Invalid command-line argument");
       delete [] suffix;
       delete [] suffix2;
-      suffix2 = NULL;
+      suffix = suffix2 = NULL;
       suffix_enable = 1;
       // hybrid option to set fall-back for suffix2
       if (strcmp(arg[iarg+1],"hybrid") == 0) {
@@ -667,15 +664,12 @@ LAMMPS::~LAMMPS()
 
   double totalclock = MPI_Wtime() - initclock;
   if ((me == 0) && (screen || logfile)) {
-    char outtime[128];
     int seconds = fmod(totalclock,60.0);
     totalclock  = (totalclock - seconds) / 60.0;
     int minutes = fmod(totalclock,60.0);
     int hours = (totalclock - minutes) / 60.0;
-    sprintf(outtime,"Total wall time: "
-            "%d:%02d:%02d\n", hours, minutes, seconds);
-    if (screen) fputs(outtime,screen);
-    if (logfile) fputs(outtime,logfile);
+    utils::logmesg(this,fmt::format("Total wall time: {}:{:02d}:{:02d}\n",
+                                    hours, minutes, seconds));
   }
 
   if (universe->nworlds == 1) {
@@ -857,9 +851,6 @@ void LAMMPS::destroy()
   delete neighbor;
   neighbor = NULL;
 
-  delete comm;
-  comm = NULL;
-
   delete force;
   force = NULL;
 
@@ -872,6 +863,10 @@ void LAMMPS::destroy()
   delete modify;          // modify must come after output, force, update
                           //   since they delete fixes
   modify = NULL;
+
+  delete comm;            // comm must come after modify
+                          //   since fix destructors may access comm
+  comm = NULL;
 
   delete domain;          // domain must come after modify
                           //   since fix destructors access domain
@@ -1252,18 +1247,15 @@ void LAMMPS::print_config(FILE *fp)
   const char *pkg;
   int ncword, ncline = 0;
 
-  const char *infobuf = Info::get_os_info();
-  fprintf(fp,"OS: %s\n\n",infobuf);
-  delete[] infobuf;
+  fmt::print(fp,"OS: {}\n\n",Info::get_os_info());
 
-  infobuf = Info::get_compiler_info();
-  fprintf(fp,"Compiler: %s with %s\n",infobuf,Info::get_openmp_info());
-  delete[] infobuf;
-  fprintf(fp,"C++ standard: %s\n",Info::get_cxx_info());
+  fmt::print(fp,"Compiler: {} with {}\nC++ standard: {}\n",
+             Info::get_compiler_info(),Info::get_openmp_info(),
+             Info::get_cxx_info());
 
   int major,minor;
-  infobuf = Info::get_mpi_info(major,minor);
-  fprintf(fp,"MPI v%d.%d: %s\n\n",major,minor,infobuf);
+  std::string infobuf = Info::get_mpi_info(major,minor);
+  fmt::print(fp,"MPI v{}.{}: {}\n\n",major,minor,infobuf);
 
   fputs("Active compile time flags:\n\n",fp);
   if (Info::has_gzip_support()) fputs("-DLAMMPS_GZIP\n",fp);
@@ -1278,11 +1270,13 @@ void LAMMPS::print_config(FILE *fp)
 #else // defined(LAMMPS_SMALLSMALL)
   fputs("-DLAMMPS_SMALLSMALL\n",fp);
 #endif
-  fprintf(fp,"\nsizeof(smallint): %3d-bit\n",(int)sizeof(smallint)*8);
-  fprintf(fp,"sizeof(imageint): %3d-bit\n",(int)sizeof(imageint)*8);
-  fprintf(fp,"sizeof(tagint):   %3d-bit\n",(int)sizeof(tagint)*8);
-  fprintf(fp,"sizeof(bigint):   %3d-bit\n",(int)sizeof(bigint)*8);
 
+  fmt::print(fp,"sizeof(smallint): {}-bit\n"
+             "sizeof(imageint): {}-bit\n"
+             "sizeof(tagint):   {}-bit\n"
+             "sizeof(bigint):   {}-bit\n",
+             sizeof(smallint)*8, sizeof(imageint)*8,
+             sizeof(tagint)*8, sizeof(bigint)*8);
 
   fputs("\nInstalled packages:\n\n",fp);
   for (int i = 0; NULL != (pkg = installed_packages[i]); ++i) {

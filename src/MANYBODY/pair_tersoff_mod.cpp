@@ -17,20 +17,17 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_tersoff_mod.h"
-#include <mpi.h>
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
-#include "atom.h"
-#include "force.h"
+
 #include "comm.h"
+#include "error.h"
 #include "math_const.h"
 #include "math_special.h"
 #include "memory.h"
-#include "error.h"
-#include "utils.h"
-#include "tokenizer.h"
 #include "potential_file_reader.h"
+#include "tokenizer.h"
+
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -53,12 +50,17 @@ void PairTersoffMOD::read_file(char *file)
   // open file on proc 0
 
   if (comm->me == 0) {
-    PotentialFileReader reader(lmp, file, "Tersoff");
+    PotentialFileReader reader(lmp, file, "tersoff/mod", unit_convert_flag);
     char * line;
 
+    // transparently convert units for supported conversions
+
+    int unit_convert = reader.get_unit_convert();
+    double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
+                                                            unit_convert);
     while((line = reader.next_line(NPARAMS_PER_LINE))) {
       try {
-        ValueTokenizer values(line, " \t\n\r\f");
+        ValueTokenizer values(line);
 
         std::string iname = values.next_string();
         std::string jname = values.next_string();
@@ -86,6 +88,11 @@ void PairTersoffMOD::read_file(char *file)
           maxparam += DELTA;
           params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
                                               "pair:params");
+
+          // make certain all addional allocated storage is initialized
+          // to avoid false positives when checking with valgrind
+
+          memset(params + nparams, 0, DELTA*sizeof(Param));
         }
 
         params[nparams].ielement = ielement;
@@ -109,6 +116,11 @@ void PairTersoffMOD::read_file(char *file)
         params[nparams].c4         = values.next_double();
         params[nparams].c5         = values.next_double();
         params[nparams].powermint = int(params[nparams].powerm);
+
+        if (unit_convert) {
+          params[nparams].biga *= conversion_factor;
+          params[nparams].bigb *= conversion_factor;
+        }
       } catch (TokenizerException & e) {
         error->one(FLERR, e.what());
       }
@@ -178,8 +190,10 @@ void PairTersoffMOD::setup_params()
     params[m].cut = params[m].bigr + params[m].bigd;
     params[m].cutsq = params[m].cut*params[m].cut;
 
-    params[m].ca1 = pow(2.0*params[m].powern_del*1.0e-16,-1.0/params[m].powern);
-    params[m].ca4 = 1.0/params[m].ca1;
+    if (params[m].powern > 0.0) {
+      params[m].ca1 = pow(2.0*params[m].powern_del*1.0e-16,-1.0/params[m].powern);
+      params[m].ca4 = 1.0/params[m].ca1;
+    } else params[m].ca1 = params[m].ca4 = 0.0;
   }
 
   // set cutmax to max of all params

@@ -12,45 +12,42 @@
 ------------------------------------------------------------------------- */
 
 #include "input.h"
-#include <mpi.h>
-#include <cstdlib>
-#include <cstring>
-#include <errno.h>
-#include <cctype>
-#include <unistd.h>
-#include <sys/stat.h>
-#include "style_command.h"
-#include "universe.h"
+
+#include "accelerator_kokkos.h"
+#include "angle.h"
 #include "atom.h"
 #include "atom_vec.h"
+#include "bond.h"
 #include "comm.h"
 #include "comm_brick.h"
 #include "comm_tiled.h"
-#include "group.h"
-#include "domain.h"
-#include "output.h"
-#include "thermo.h"
-#include "force.h"
-#include "pair.h"
-#include "min.h"
-#include "modify.h"
 #include "compute.h"
-#include "fix.h"
-#include "bond.h"
-#include "angle.h"
 #include "dihedral.h"
+#include "domain.h"
+#include "error.h"
+#include "force.h"
+#include "group.h"
 #include "improper.h"
 #include "kspace.h"
-#include "update.h"
-#include "neighbor.h"
-#include "special.h"
-#include "timer.h"
-#include "variable.h"
-#include "accelerator_kokkos.h"
-#include "error.h"
 #include "memory.h"
-#include "utils.h"
-#include "fmt/format.h"
+#include "min.h"
+#include "modify.h"
+#include "neighbor.h"
+#include "output.h"
+#include "pair.h"
+#include "special.h"
+#include "style_command.h"
+#include "thermo.h"
+#include "timer.h"
+#include "universe.h"
+#include "update.h"
+#include "variable.h"
+
+#include <cstring>
+#include <errno.h>
+#include <cctype>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -227,11 +224,8 @@ void Input::file()
 
     // execute the command
 
-    if (execute_command()) {
-      char *str = new char[maxline+32];
-      sprintf(str,"Unknown command: %s",line);
-      error->all(FLERR,str);
-    }
+    if (execute_command() && line)
+      error->all(FLERR,fmt::format("Unknown command: {}",line));
   }
 }
 
@@ -309,11 +303,11 @@ char *Input::one(const std::string &single)
 /* ----------------------------------------------------------------------
    Send text to active echo file pointers
 ------------------------------------------------------------------------- */
-void Input::write_echo(const char *txt)
+void Input::write_echo(const std::string &txt)
 {
   if (me == 0) {
-    if (echo_screen && screen) fputs(txt,screen);
-    if (echo_log && logfile) fputs(txt,logfile);
+    if (echo_screen && screen) fputs(txt.c_str(),screen);
+    if (echo_log && logfile) fputs(txt.c_str(),logfile);
   }
 }
 
@@ -603,141 +597,6 @@ void Input::substitute(char *&str, char *&str2, int &max, int &max2, int flag)
 }
 
 /* ----------------------------------------------------------------------
-   expand arg to earg, for arguments with syntax c_ID[*] or f_ID[*]
-   fields to consider in input arg range from iarg to narg
-   return new expanded # of values, and copy them w/out "*" into earg
-   if any expansion occurs, earg is new allocation, must be freed by caller
-   if no expansion occurs, earg just points to arg, caller need not free
-------------------------------------------------------------------------- */
-
-int Input::expand_args(int narg, char **arg, int mode, char **&earg)
-{
-  int n,iarg,index,nlo,nhi,nmax,expandflag,icompute,ifix;
-  char *ptr1,*ptr2,*str;
-
-  ptr1 = NULL;
-  for (iarg = 0; iarg < narg; iarg++) {
-    ptr1 = strchr(arg[iarg],'*');
-    if (ptr1) break;
-  }
-
-  if (!ptr1) {
-    earg = arg;
-    return narg;
-  }
-
-  // maxarg should always end up equal to newarg, so caller can free earg
-
-  int maxarg = narg-iarg;
-  earg = (char **) memory->smalloc(maxarg*sizeof(char *),"input:earg");
-
-  int newarg = 0;
-  for (iarg = 0; iarg < narg; iarg++) {
-    expandflag = 0;
-
-    if (strncmp(arg[iarg],"c_",2) == 0 ||
-        strncmp(arg[iarg],"f_",2) == 0) {
-
-      ptr1 = strchr(&arg[iarg][2],'[');
-      if (ptr1) {
-        ptr2 = strchr(ptr1,']');
-        if (ptr2) {
-          *ptr2 = '\0';
-          if (strchr(ptr1,'*')) {
-            if (arg[iarg][0] == 'c') {
-              *ptr1 = '\0';
-              icompute = modify->find_compute(&arg[iarg][2]);
-              *ptr1 = '[';
-
-              // check for global vector/array, peratom array, local array
-
-              if (icompute >= 0) {
-                if (mode == 0 && modify->compute[icompute]->vector_flag) {
-                  nmax = modify->compute[icompute]->size_vector;
-                  expandflag = 1;
-                } else if (mode == 1 && modify->compute[icompute]->array_flag) {
-                  nmax = modify->compute[icompute]->size_array_cols;
-                  expandflag = 1;
-                } else if (modify->compute[icompute]->peratom_flag &&
-                           modify->compute[icompute]->size_peratom_cols) {
-                  nmax = modify->compute[icompute]->size_peratom_cols;
-                  expandflag = 1;
-                } else if (modify->compute[icompute]->local_flag &&
-                           modify->compute[icompute]->size_local_cols) {
-                  nmax = modify->compute[icompute]->size_local_cols;
-                  expandflag = 1;
-                }
-              }
-            } else if (arg[iarg][0] == 'f') {
-              *ptr1 = '\0';
-              ifix = modify->find_fix(&arg[iarg][2]);
-              *ptr1 = '[';
-
-              // check for global vector/array, peratom array, local array
-
-              if (ifix >= 0) {
-                if (mode == 0 && modify->fix[ifix]->vector_flag) {
-                  nmax = modify->fix[ifix]->size_vector;
-                  expandflag = 1;
-                } else if (mode == 1 && modify->fix[ifix]->array_flag) {
-                  nmax = modify->fix[ifix]->size_array_cols;
-                  expandflag = 1;
-                } else if (modify->fix[ifix]->peratom_flag &&
-                           modify->fix[ifix]->size_peratom_cols) {
-                  nmax = modify->fix[ifix]->size_peratom_cols;
-                  expandflag = 1;
-                } else if (modify->fix[ifix]->local_flag &&
-                           modify->fix[ifix]->size_local_cols) {
-                  nmax = modify->fix[ifix]->size_local_cols;
-                  expandflag = 1;
-                }
-              }
-            }
-          }
-          *ptr2 = ']';
-        }
-      }
-    }
-
-    if (expandflag) {
-      *ptr2 = '\0';
-      force->bounds(FLERR,ptr1+1,nmax,nlo,nhi);
-      *ptr2 = ']';
-      if (newarg+nhi-nlo+1 > maxarg) {
-        maxarg += nhi-nlo+1;
-        earg = (char **)
-          memory->srealloc(earg,maxarg*sizeof(char *),"input:earg");
-      }
-      for (index = nlo; index <= nhi; index++) {
-        n = strlen(arg[iarg]) + 16;   // 16 = space for large inserted integer
-        str = earg[newarg] = new char[n];
-        strncpy(str,arg[iarg],ptr1+1-arg[iarg]);
-        sprintf(&str[ptr1+1-arg[iarg]],"%d",index);
-        strcat(str,ptr2);
-        newarg++;
-      }
-
-    } else {
-      if (newarg == maxarg) {
-        maxarg++;
-        earg = (char **)
-          memory->srealloc(earg,maxarg*sizeof(char *),"input:earg");
-      }
-      n = strlen(arg[iarg]) + 1;
-      earg[newarg] = new char[n];
-      strcpy(earg[newarg],arg[iarg]);
-      newarg++;
-    }
-  }
-
-  //printf("NEWARG %d\n",newarg);
-  //for (int i = 0; i < newarg; i++)
-  //  printf("  arg %d: %s\n",i,earg[i]);
-
-  return newarg;
-}
-
-/* ----------------------------------------------------------------------
    return number of triple quotes in line
 ------------------------------------------------------------------------- */
 
@@ -856,7 +715,7 @@ int Input::execute_command()
   // invoke commands added via style_command.h
 
   if (command_map->find(command) != command_map->end()) {
-    CommandCreator command_creator = (*command_map)[command];
+    CommandCreator &command_creator = (*command_map)[command];
     command_creator(lmp,narg,arg);
     return 0;
   }
@@ -1099,7 +958,7 @@ void Input::label()
 
 void Input::log()
 {
-  if (narg > 2) error->all(FLERR,"Illegal log command");
+  if ((narg < 1) || (narg > 2)) error->all(FLERR,"Illegal log command");
 
   int appendflag = 0;
   if (narg == 2) {
@@ -1142,7 +1001,7 @@ void Input::partition()
   else error->all(FLERR,"Illegal partition command");
 
   int ilo,ihi;
-  force->bounds(FLERR,arg[1],universe->nworlds,ilo,ihi);
+  utils::bounds(FLERR,arg[1],1,universe->nworlds,ilo,ihi,error);
 
   // copy original line to copy, since will use strtok() on it
   // ptr = start of 4th word
@@ -1238,7 +1097,7 @@ void Input::python()
 void Input::quit()
 {
   if (narg == 0) error->done(0); // 1 would be fully backwards compatible
-  if (narg == 1) error->done(force->inumeric(FLERR,arg[0]));
+  if (narg == 1) error->done(utils::inumeric(FLERR,arg[0],false,lmp));
   error->all(FLERR,"Illegal quit command");
 }
 
@@ -1246,10 +1105,10 @@ void Input::quit()
 
 char *shell_failed_message(const char* cmd, int errnum)
 {
-  const char *errmsg = strerror(errnum);
-  int len = strlen(cmd)+strlen(errmsg)+64;
-  char *msg = new char[len];
-  sprintf(msg,"Shell command '%s' failed with error '%s'", cmd, errmsg);
+  std::string errmsg = fmt::format("Shell command '{}' failed with error '{}'",
+                                   cmd, strerror(errnum));
+  char *msg = new char[errmsg.size()+1];
+  strcpy(msg, errmsg.c_str());
   return msg;
 }
 
@@ -1512,7 +1371,7 @@ void Input::compute_modify()
 void Input::dielectric()
 {
   if (narg != 1) error->all(FLERR,"Illegal dielectric command");
-  force->dielectric = force->numeric(FLERR,arg[0]);
+  force->dielectric = utils::numeric(FLERR,arg[0],false,lmp);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1546,7 +1405,7 @@ void Input::dimension()
   if (narg != 1) error->all(FLERR,"Illegal dimension command");
   if (domain->box_exist)
     error->all(FLERR,"Dimension command after simulation box is defined");
-  domain->dimension = force->inumeric(FLERR,arg[0]);
+  domain->dimension = utils::inumeric(FLERR,arg[0],false,lmp);
   if (domain->dimension != 2 && domain->dimension != 3)
     error->all(FLERR,"Illegal dimension command");
 
@@ -1731,13 +1590,9 @@ void Input::package()
     if (!modify->check_package("GPU"))
       error->all(FLERR,"Package gpu command without GPU package installed");
 
-    char **fixarg = new char*[2+narg];
-    fixarg[0] = (char *) "package_gpu";
-    fixarg[1] = (char *) "all";
-    fixarg[2] = (char *) "GPU";
-    for (int i = 1; i < narg; i++) fixarg[i+2] = arg[i];
-    modify->add_fix(2+narg,fixarg);
-    delete [] fixarg;
+    std::string fixcmd = "package_gpu all GPU";
+    for (int i = 1; i < narg; i++) fixcmd += std::string(" ") + arg[i];
+    modify->add_fix(fixcmd);
 
   } else if (strcmp(arg[0],"kokkos") == 0) {
     if (lmp->kokkos == NULL || lmp->kokkos->kokkos_exists == 0)
@@ -1750,26 +1605,18 @@ void Input::package()
       error->all(FLERR,
                  "Package omp command without USER-OMP package installed");
 
-    char **fixarg = new char*[2+narg];
-    fixarg[0] = (char *) "package_omp";
-    fixarg[1] = (char *) "all";
-    fixarg[2] = (char *) "OMP";
-    for (int i = 1; i < narg; i++) fixarg[i+2] = arg[i];
-    modify->add_fix(2+narg,fixarg);
-    delete [] fixarg;
+    std::string fixcmd = "package_omp all OMP";
+    for (int i = 1; i < narg; i++) fixcmd += std::string(" ") + arg[i];
+    modify->add_fix(fixcmd);
 
  } else if (strcmp(arg[0],"intel") == 0) {
     if (!modify->check_package("INTEL"))
       error->all(FLERR,
                  "Package intel command without USER-INTEL package installed");
 
-    char **fixarg = new char*[2+narg];
-    fixarg[0] = (char *) "package_intel";
-    fixarg[1] = (char *) "all";
-    fixarg[2] = (char *) "INTEL";
-    for (int i = 1; i < narg; i++) fixarg[i+2] = arg[i];
-    modify->add_fix(2+narg,fixarg);
-    delete [] fixarg;
+    std::string fixcmd = "package_intel all INTEL";
+    for (int i = 1; i < narg; i++) fixcmd += std::string(" ") + arg[i];
+    modify->add_fix(fixcmd);
 
   } else error->all(FLERR,"Illegal package command");
 }
@@ -1907,12 +1754,16 @@ void Input::suffix()
   if (narg < 1) error->all(FLERR,"Illegal suffix command");
 
   if (strcmp(arg[0],"off") == 0) lmp->suffix_enable = 0;
-  else if (strcmp(arg[0],"on") == 0) lmp->suffix_enable = 1;
-  else {
+  else if (strcmp(arg[0],"on") == 0) {
+    if (!lmp->suffix)
+      error->all(FLERR,"May only enable suffixes after defining one");
+    lmp->suffix_enable = 1;
+  } else {
     lmp->suffix_enable = 1;
 
     delete [] lmp->suffix;
     delete [] lmp->suffix2;
+    lmp->suffix = lmp->suffix2 = nullptr;
 
     if (strcmp(arg[0],"hybrid") == 0) {
       if (narg != 3) error->all(FLERR,"Illegal suffix command");
@@ -1964,7 +1815,7 @@ void Input::timer_command()
 void Input::timestep()
 {
   if (narg != 1) error->all(FLERR,"Illegal timestep command");
-  update->dt = force->numeric(FLERR,arg[0]);
+  update->dt = utils::numeric(FLERR,arg[0],false,lmp);
 }
 
 /* ---------------------------------------------------------------------- */

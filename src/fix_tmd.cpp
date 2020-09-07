@@ -17,7 +17,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_tmd.h"
-#include <mpi.h>
+
 #include <cmath>
 #include <cstring>
 #include "atom.h"
@@ -29,8 +29,8 @@
 #include "force.h"
 #include "memory.h"
 #include "error.h"
-#include "utils.h"
-#include "fmt/format.h"
+
+
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -45,8 +45,8 @@ nfileevery(0), fp(NULL), xf(NULL), xold(NULL)
 {
   if (narg < 6) error->all(FLERR,"Illegal fix tmd command");
 
-  rho_stop = force->numeric(FLERR,arg[3]);
-  nfileevery = force->inumeric(FLERR,arg[5]);
+  rho_stop = utils::numeric(FLERR,arg[3],false,lmp);
+  nfileevery = utils::inumeric(FLERR,arg[5],false,lmp);
   if (rho_stop < 0 || nfileevery < 0)
     error->all(FLERR,"Illegal fix tmd command");
   if (nfileevery && narg != 7) error->all(FLERR,"Illegal fix tmd command");
@@ -446,12 +446,12 @@ void FixTMD::readfile(char *file)
           zprd = hi - lo;
           bufptr = next + 1;
           continue;
-        } else if (utils::count_words(bufptr) == 4) {
+        } else if (utils::trim_and_count_words(bufptr) == 4) {
           if (xprd >= 0.0 || yprd >= 0.0 || zprd >= 0.0)
             error->all(FLERR,"Incorrect format in TMD target file");
           imageflag = 0;
           firstline = 0;
-        } else if (utils::count_words(bufptr) == 7) {
+        } else if (utils::trim_and_count_words(bufptr) == 7) {
           if (xprd < 0.0 || yprd < 0.0 || zprd < 0.0)
             error->all(FLERR,"Incorrect format in TMD target file");
           imageflag = 1;

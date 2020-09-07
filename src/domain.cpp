@@ -16,29 +16,28 @@
 ------------------------------------------------------------------------- */
 
 #include "domain.h"
-#include <mpi.h>
-#include <cstring>
-#include <cmath>
-#include <string>
-#include "style_region.h"
+#include "style_region.h"   // IWYU pragma: keep
+
 #include "atom.h"
 #include "atom_vec.h"
-#include "molecule.h"
-#include "force.h"
-#include "kspace.h"
-#include "update.h"
-#include "modify.h"
+#include "comm.h"
+#include "error.h"
 #include "fix.h"
 #include "fix_deform.h"
-#include "region.h"
+#include "force.h"
+#include "kspace.h"
 #include "lattice.h"
-#include "comm.h"
+#include "memory.h"
+#include "modify.h"
+#include "molecule.h"
 #include "output.h"
+#include "region.h"
 #include "thermo.h"
 #include "universe.h"
-#include "memory.h"
-#include "error.h"
-#include "utils.h"
+#include "update.h"
+
+#include <cstring>
+#include <cmath>
 
 using namespace LAMMPS_NS;
 
@@ -107,7 +106,8 @@ Domain::Domain(LAMMPS *lmp) : Pointers(lmp)
 #define REGION_CLASS
 #define RegionStyle(key,Class) \
   (*region_map)[#key] = &region_creator<Class>;
-#include "style_region.h"
+#include "style_region.h"   // IWYU pragma: keep
+
 #undef RegionStyle
 #undef REGION_CLASS
 }
@@ -1761,10 +1761,9 @@ void Domain::add_region(int narg, char **arg)
 
   if (lmp->suffix_enable) {
     if (lmp->suffix) {
-      char estyle[256];
-      snprintf(estyle,256,"%s/%s",arg[1],lmp->suffix);
+      std::string estyle = std::string(arg[1]) + "/" + lmp->suffix;
       if (region_map->find(estyle) != region_map->end()) {
-        RegionCreator region_creator = (*region_map)[estyle];
+        RegionCreator &region_creator = (*region_map)[estyle];
         regions[nregion] = region_creator(lmp, narg, arg);
         regions[nregion]->init();
         nregion++;
@@ -1773,10 +1772,9 @@ void Domain::add_region(int narg, char **arg)
     }
 
     if (lmp->suffix2) {
-      char estyle[256];
-      snprintf(estyle,256,"%s/%s",arg[1],lmp->suffix2);
+      std::string estyle = std::string(arg[1]) + "/" + lmp->suffix2;
       if (region_map->find(estyle) != region_map->end()) {
-        RegionCreator region_creator = (*region_map)[estyle];
+        RegionCreator &region_creator = (*region_map)[estyle];
         regions[nregion] = region_creator(lmp, narg, arg);
         regions[nregion]->init();
         nregion++;
@@ -1786,7 +1784,7 @@ void Domain::add_region(int narg, char **arg)
   }
 
   if (region_map->find(arg[1]) != region_map->end()) {
-    RegionCreator region_creator = (*region_map)[arg[1]];
+    RegionCreator &region_creator = (*region_map)[arg[1]];
     regions[nregion] = region_creator(lmp, narg, arg);
   } else error->all(FLERR,utils::check_packages_for_style("region",arg[1],lmp));
 
@@ -1935,33 +1933,21 @@ void Domain::set_box(int narg, char **arg)
    print box info, orthogonal or triclinic
 ------------------------------------------------------------------------- */
 
-void Domain::print_box(const char *str)
+void Domain::print_box(const std::string &prefix)
 {
   if (comm->me == 0) {
-    if (screen) {
-      if (triclinic == 0)
-        fprintf(screen,"%sorthogonal box = (%g %g %g) to (%g %g %g)\n",
-                str,boxlo[0],boxlo[1],boxlo[2],boxhi[0],boxhi[1],boxhi[2]);
-      else {
-        char *format = (char *)
-          "%striclinic box = (%g %g %g) to (%g %g %g) with tilt (%g %g %g)\n";
-        fprintf(screen,format,
-                str,boxlo[0],boxlo[1],boxlo[2],boxhi[0],boxhi[1],boxhi[2],
-                xy,xz,yz);
-      }
+    std::string mesg = prefix;
+    if (triclinic == 0) {
+      mesg += fmt::format("orthogonal box = ({:.8} {:.8} {:.8}) to "
+                          "({:.8} {:.8} {:.8})\n",boxlo[0],boxlo[1],
+                          boxlo[2],boxhi[0],boxhi[1],boxhi[2]);
+    } else {
+      mesg += fmt::format("triclinic box = ({:.8} {:.8} {:.8}) to "
+                          "({:.8} {:.8} {:.8}) with tilt "
+                          "({:.8} {:.8} {:.8})\n",boxlo[0],boxlo[1],
+                          boxlo[2],boxhi[0],boxhi[1],boxhi[2],xy,xz,yz);
     }
-    if (logfile) {
-      if (triclinic == 0)
-        fprintf(logfile,"%sorthogonal box = (%g %g %g) to (%g %g %g)\n",
-                str,boxlo[0],boxlo[1],boxlo[2],boxhi[0],boxhi[1],boxhi[2]);
-      else {
-        char *format = (char *)
-          "%striclinic box = (%g %g %g) to (%g %g %g) with tilt (%g %g %g)\n";
-        fprintf(logfile,format,
-                str,boxlo[0],boxlo[1],boxlo[2],boxhi[0],boxhi[1],boxhi[2],
-                xy,xz,yz);
-      }
-    }
+    utils::logmesg(lmp,mesg);
   }
 }
 

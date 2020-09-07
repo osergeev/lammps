@@ -16,19 +16,18 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_eim.h"
-#include <mpi.h>
+
+#include "atom.h"
+#include "comm.h"
+#include "error.h"
+#include "force.h"
+#include "memory.h"
+#include "neigh_list.h"
+#include "neighbor.h"
+#include "tokenizer.h"
+
 #include <cmath>
 #include <cstring>
-#include "atom.h"
-#include "force.h"
-#include "comm.h"
-#include "neighbor.h"
-#include "neigh_list.h"
-#include "memory.h"
-#include "error.h"
-#include "utils.h"
-#include "tokenizer.h"
-#include "potential_file_reader.h"
 
 using namespace LAMMPS_NS;
 
@@ -40,6 +39,7 @@ PairEIM::PairEIM(LAMMPS *lmp) : Pair(lmp)
   restartinfo = 0;
   one_coeff = 1;
   manybody_flag = 1;
+  unit_convert_flag = utils::get_supported_conversions(utils::ENERGY);
 
   setfl = NULL;
   nmax = 0;
@@ -476,7 +476,7 @@ void PairEIM::read_file(char *filename)
 
   // read potential file
   if( comm->me == 0) {
-    EIMPotentialFileReader reader(lmp, filename);
+    EIMPotentialFileReader reader(lmp, filename, unit_convert_flag);
 
     reader.get_global(setfl);
 
@@ -641,7 +641,7 @@ void PairEIM::file2array()
 
   delete [] negativity;
   delete [] q0;
-  delete [] cutforcesq;
+  memory->destroy(cutforcesq);
   negativity = new double[ntypes+1];
   q0 = new double[ntypes+1];
   memory->create(cutforcesq,ntypes+1,ntypes+1,"pair:cutforcesq");
@@ -1049,19 +1049,21 @@ double PairEIM::memory_usage()
   return bytes;
 }
 
-EIMPotentialFileReader::EIMPotentialFileReader(LAMMPS * lmp, const std::string & filename) :
+EIMPotentialFileReader::EIMPotentialFileReader(LAMMPS *lmp,
+                                               const std::string &filename,
+                                               const int auto_convert) :
   Pointers(lmp), filename(filename)
 {
   if (comm->me != 0) {
     error->one(FLERR, "EIMPotentialFileReader should only be called by proc 0!");
   }
 
-  FILE * fp = force->open_potential(filename.c_str());
+  int unit_convert = auto_convert;
+  FILE *fp = utils::open_potential(filename, lmp, &unit_convert);
+  conversion_factor = utils::get_conversion_factor(utils::ENERGY,unit_convert);
 
   if (fp == NULL) {
-    char str[128];
-    snprintf(str, 128, "cannot open EIM potential file %s", filename.c_str());
-    error->one(FLERR, str);
+    error->one(FLERR, fmt::format("cannot open eim potential file {}", filename));
   }
 
   parse(fp);
@@ -1124,7 +1126,7 @@ char * EIMPotentialFileReader::next_line(FILE * fp) {
       concat = false;
     }
 
-    nwords = utils::count_words(line);
+    nwords += utils::count_words(&line[n]);
 
     // skip line if blank
     if (nwords > 0) {
@@ -1141,7 +1143,7 @@ void EIMPotentialFileReader::parse(FILE * fp)
   bool found_global = false;
 
   while((line = next_line(fp))) {
-    ValueTokenizer values(line, " \t\r\n\f");
+    ValueTokenizer values(line);
     std::string type = values.next_string();
 
     if (type == "global:") {
@@ -1187,7 +1189,7 @@ void EIMPotentialFileReader::parse(FILE * fp)
       PairData data;
       data.rcutphiA  = values.next_double();
       data.rcutphiR  = values.next_double();
-      data.Eb        = values.next_double();
+      data.Eb        = values.next_double() * conversion_factor;
       data.r0        = values.next_double();
       data.alpha     = values.next_double();
       data.beta      = values.next_double();
@@ -1195,7 +1197,7 @@ void EIMPotentialFileReader::parse(FILE * fp)
       data.Asigma    = values.next_double();
       data.rq        = values.next_double();
       data.rcutsigma = values.next_double();
-      data.Ac        = values.next_double();
+      data.Ac        = values.next_double() * conversion_factor;
       data.zeta      = values.next_double();
       data.rs        = values.next_double();
 
@@ -1218,20 +1220,18 @@ void EIMPotentialFileReader::parse(FILE * fp)
   }
 }
 
-void EIMPotentialFileReader::get_global(PairEIM::Setfl * setfl) {
+void EIMPotentialFileReader::get_global(PairEIM::Setfl *setfl) {
   setfl->division  = division;
   setfl->rbig      = rbig;
   setfl->rsmall    = rsmall;
 }
 
-void EIMPotentialFileReader::get_element(PairEIM::Setfl * setfl, int i, const std::string & name) {
-  if (elements.find(name) == elements.end()) {
-    char str[128];
-    snprintf(str, 128, "Element %s not defined in EIM potential file", name.c_str());
-    error->one(FLERR, str);
-  }
+void EIMPotentialFileReader::get_element(PairEIM::Setfl *setfl, int i,
+                                         const std::string &name) {
+  if (elements.find(name) == elements.end())
+    error->one(FLERR,"Element " + name + " not defined in EIM potential file");
 
-  ElementData & data = elements[name];
+  ElementData &data = elements[name];
   setfl->ielement[i] = data.ielement;
   setfl->mass[i] = data.mass;
   setfl->negativity[i] = data.negativity;
@@ -1241,16 +1241,16 @@ void EIMPotentialFileReader::get_element(PairEIM::Setfl * setfl, int i, const st
   setfl->q0[i] = data.q0;
 }
 
-void EIMPotentialFileReader::get_pair(PairEIM::Setfl * setfl, int ij, const std::string & elemA, const std::string & elemB) {
+void EIMPotentialFileReader::get_pair(PairEIM::Setfl *setfl, int ij,
+                                      const std::string &elemA,
+                                      const std::string &elemB) {
   auto p = get_pair(elemA, elemB);
 
-  if (pairs.find(p) == pairs.end()) {
-    char str[128];
-    snprintf(str, 128, "Pair (%s, %s) not defined in EIM potential file", elemA.c_str(), elemB.c_str());
-    error->one(FLERR, str);
-  }
+  if (pairs.find(p) == pairs.end())
+    error->one(FLERR,"Element pair (" + elemA + ", " + elemB
+               + ") is not defined in EIM potential file");
 
-  PairData & data = pairs[p];
+  PairData &data = pairs[p];
   setfl->rcutphiA[ij] = data.rcutphiA;
   setfl->rcutphiR[ij] = data.rcutphiR;
   setfl->Eb[ij] = data.Eb;

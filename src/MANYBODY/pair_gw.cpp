@@ -17,9 +17,9 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_gw.h"
-#include <mpi.h>
+
 #include <cmath>
-#include <cstdlib>
+
 #include <cstring>
 #include "atom.h"
 #include "neighbor.h"
@@ -29,7 +29,7 @@
 #include "comm.h"
 #include "memory.h"
 #include "error.h"
-#include "utils.h"
+
 #include "tokenizer.h"
 #include "potential_file_reader.h"
 
@@ -48,6 +48,7 @@ PairGW::PairGW(LAMMPS *lmp) : Pair(lmp)
   restartinfo = 0;
   one_coeff = 1;
   manybody_flag = 1;
+  unit_convert_flag = utils::get_supported_conversions(utils::ENERGY);
 
   nelements = 0;
   elements = NULL;
@@ -375,12 +376,17 @@ void PairGW::read_file(char *file)
   // open file on proc 0
 
   if (comm->me == 0) {
-    PotentialFileReader reader(lmp, file, "GW");
+    PotentialFileReader reader(lmp, file, "gw", unit_convert_flag);
     char * line;
 
+    // transparently convert units for supported conversions
+
+    int unit_convert = reader.get_unit_convert();
+    double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
+                                                            unit_convert);
     while((line = reader.next_line(NPARAMS_PER_LINE))) {
       try {
-        ValueTokenizer values(line, " \t\n\r\f");
+        ValueTokenizer values(line);
 
         std::string iname = values.next_string();
         std::string jname = values.next_string();
@@ -407,6 +413,11 @@ void PairGW::read_file(char *file)
           maxparam += DELTA;
           params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
                                               "pair:params");
+
+          // make certain all addional allocated storage is initialized
+          // to avoid false positives when checking with valgrind
+
+          memset(params + nparams, 0, DELTA*sizeof(Param));
         }
 
         params[nparams].ielement = ielement;
@@ -427,6 +438,11 @@ void PairGW::read_file(char *file)
         params[nparams].lam1   = values.next_double();
         params[nparams].biga   = values.next_double();
         params[nparams].powermint = int(params[nparams].powerm);
+
+        if (unit_convert) {
+          params[nparams].biga *= conversion_factor;
+          params[nparams].bigb *= conversion_factor;
+        }
       } catch (TokenizerException & e) {
         error->one(FLERR, e.what());
       }

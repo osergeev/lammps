@@ -17,7 +17,7 @@
 
 #include "pair_eam_fs_gpu.h"
 #include <cstdio>
-#include <cstdlib>
+
 #include <cstring>
 #include "atom.h"
 #include "force.h"
@@ -30,7 +30,7 @@
 #include "gpu_extra.h"
 #include "domain.h"
 #include "suffix.h"
-#include "utils.h"
+
 #include "tokenizer.h"
 #include "potential_file_reader.h"
 
@@ -371,18 +371,21 @@ void PairEAMFSGPU::read_file(char *filename)
 
   // read potential file
   if(comm->me == 0) {
-    PotentialFileReader reader(lmp, filename, "EAM");
+    PotentialFileReader reader(PairEAM::lmp, filename, "eam/fs",
+                               unit_convert_flag);
 
+    // transparently convert units for supported conversions
+
+    int unit_convert = reader.get_unit_convert();
+    double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
+                                                            unit_convert);
     try {
-      char * line = nullptr;
-
       reader.skip_line();
       reader.skip_line();
       reader.skip_line();
 
       // extract element names from nelements line
-      line = reader.next_line(1);
-      ValueTokenizer values(line);
+      ValueTokenizer values = reader.next_values(1);
       file->nelements = values.next_int();
 
       if (values.count() != file->nelements + 1)
@@ -398,8 +401,7 @@ void PairEAMFSGPU::read_file(char *filename)
 
       //
 
-      line = reader.next_line(5);
-      values = ValueTokenizer(line);
+      values = reader.next_values(5);
       file->nrho = values.next_int();
       file->drho = values.next_double();
       file->nr   = values.next_int();
@@ -415,21 +417,28 @@ void PairEAMFSGPU::read_file(char *filename)
       memory->create(file->z2r, file->nelements, file->nelements, file->nr + 1, "pair:z2r");
 
       for (int i = 0; i < file->nelements; i++) {
-        line = reader.next_line(2);
-        values = ValueTokenizer(line);
+        values = reader.next_values(2);
         values.next_int(); // ignore
         file->mass[i] = values.next_double();
 
-        reader.next_dvector(file->nrho, &file->frho[i][1]);
+        reader.next_dvector(&file->frho[i][1], file->nrho);
+        if (unit_convert) {
+          for (int j = 1; j <= file->nrho; ++j)
+            file->frho[i][j] *= conversion_factor;
+        }
 
         for (int j = 0; j < file->nelements; j++) {
-          reader.next_dvector(file->nr, &file->rhor[i][j][1]);
+          reader.next_dvector(&file->rhor[i][j][1], file->nr);
         }
       }
 
       for (int i = 0; i < file->nelements; i++) {
         for (int j = 0; j <= i; j++) {
-          reader.next_dvector(file->nr, &file->z2r[i][j][1]);
+          reader.next_dvector(&file->z2r[i][j][1], file->nr);
+          if (unit_convert) {
+            for (int k = 1; k <= file->nr; ++k)
+              file->z2r[i][j][k] *= conversion_factor;
+          }
         }
       }
     } catch (TokenizerException & e) {

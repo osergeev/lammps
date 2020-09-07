@@ -12,16 +12,11 @@
 ------------------------------------------------------------------------- */
 
 #include "error.h"
-#include <mpi.h>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include "universe.h"
-#include "output.h"
-#include "input.h"
+
 #include "accelerator_kokkos.h"
-#include "utils.h"
-#include "fmt/format.h"
+#include "input.h"
+#include "output.h"
+#include "universe.h"
 
 #if defined(LAMMPS_EXCEPTIONS)
 #include "update.h"
@@ -107,6 +102,7 @@ void Error::universe_one(const std::string &file, int line, const std::string &s
   throw LAMMPSAbortException(mesg, universe->uworld);
 #else
   MPI_Abort(universe->uworld,1);
+  exit(1); // to trick "smart" compilers into believing this does not return
 #endif
 }
 
@@ -205,6 +201,7 @@ void Error::one(const std::string &file, int line, const std::string &str)
   if (screen) fflush(screen);
   if (logfile) fflush(logfile);
   MPI_Abort(world,1);
+  exit(1); // to trick "smart" compilers into believing this does not return
 #endif
 }
 
