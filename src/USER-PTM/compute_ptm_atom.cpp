@@ -1,6 +1,7 @@
+// clang-format off
 /* ----------------------------------------------------------------------
          LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-         http://lammps.sandia.gov, Sandia National Laboratories
+         https://www.lammps.org/, Sandia National Laboratories
          Steve Plimpton, sjplimp@sandia.gov
 
          Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -17,25 +18,28 @@ under
 ------------------------------------------------------------------------- */
 
 #include "compute_ptm_atom.h"
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <vector>
 
 #include "atom.h"
 #include "citeme.h"
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "group.h"
 #include "memory.h"
 #include "modify.h"
 #include "neigh_list.h"
 #include "neigh_request.h"
 #include "neighbor.h"
 #include "update.h"
-#include "group.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <vector>
+
+#include "ptm_constants.h"
 #include "ptm_functions.h"
+#include "ptm_initialize_data.h"
 
 #define NUM_COLUMNS 7
 #define PTM_LAMMPS_UNKNOWN -1
@@ -203,7 +207,7 @@ static int get_neighbours(void* vdata, size_t central_index, size_t atom_index, 
 
   int *jlist = nullptr;
   int jnum = 0;
-  if (atom_index < data->nlocal) {
+  if ((int)atom_index < data->nlocal) {
     jlist = data->firstneigh[atom_index];
     jnum = data->numneigh[atom_index];
   }
@@ -220,7 +224,7 @@ static int get_neighbours(void* vdata, size_t central_index, size_t atom_index, 
       continue;
 
     j &= NEIGHMASK;
-    if (j == atom_index)
+    if (j == (int)atom_index)
       continue;
 
     double dx = pos[0] - x[j][0];
@@ -285,7 +289,7 @@ void ComputePTMAtom::compute_peratom() {
 
   // zero output
 
-  memset(output,0,nmax*NUM_COLUMNS*sizeof(double));
+  memset(&output[0][0],0,nmax*NUM_COLUMNS*sizeof(double));
 
   for (int ii = 0; ii < inum; ii++) {
 
@@ -304,21 +308,17 @@ void ComputePTMAtom::compute_peratom() {
     double scale, rmsd, interatomic_distance;
     double q[4];
     bool standard_orientations = false;
+
+    rmsd = INFINITY;
+    interatomic_distance = q[0] = q[1] = q[2] = q[3] = 0.0;
+
     ptm_index(local_handle, i, get_neighbours, (void*)&nbrlist,
               input_flags, standard_orientations,
               &type, &alloy_type, &scale, &rmsd, q,
               nullptr, nullptr, nullptr, nullptr, &interatomic_distance, nullptr, nullptr);
 
-    if (rmsd > rmsd_threshold) {
-      type = PTM_MATCH_NONE;
-    }
-
-    // printf("%d type=%d rmsd=%f\n", i, type, rmsd);
-
-    if (type == PTM_MATCH_NONE) {
-      type = PTM_LAMMPS_OTHER;
-      rmsd = INFINITY;
-    }
+    if (rmsd > rmsd_threshold) type = PTM_MATCH_NONE;
+    if (type == PTM_MATCH_NONE) type = PTM_LAMMPS_OTHER;
 
     output[i][0] = type;
     output[i][1] = rmsd;
@@ -329,7 +329,6 @@ void ComputePTMAtom::compute_peratom() {
     output[i][6] = q[3];
   }
 
-  // printf("finished ptm analysis\n");
   ptm_uninitialize_local(local_handle);
 }
 
@@ -338,7 +337,7 @@ void ComputePTMAtom::compute_peratom() {
 ------------------------------------------------------------------------- */
 
 double ComputePTMAtom::memory_usage() {
-  double bytes = nmax * NUM_COLUMNS * sizeof(double);
-  bytes += nmax * sizeof(double);
+  double bytes = (double)nmax * NUM_COLUMNS * sizeof(double);
+  bytes += (double)nmax * sizeof(double);
   return bytes;
 }

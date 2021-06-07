@@ -1,6 +1,7 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   http://lammps.sandia.gov, Sandia National Laboratories
+   https://www.lammps.org/, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -9,6 +10,10 @@
    the GNU General Public License.
 
    See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Aidan Thompson (SNL)
 ------------------------------------------------------------------------- */
 
 #include "mliap_descriptor.h"
@@ -22,5 +27,5 @@ MLIAPDescriptor::MLIAPDescriptor(LAMMPS *lmp) : Pointers(lmp) {}
 
 /* ---------------------------------------------------------------------- */
 
-MLIAPDescriptor::~MLIAPDescriptor(){}
+MLIAPDescriptor::~MLIAPDescriptor() {}
 

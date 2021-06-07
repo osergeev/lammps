@@ -1,6 +1,7 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   http://lammps.sandia.gov, Sandia National Laboratories
+   https://www.lammps.org/, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -16,8 +17,6 @@
 ------------------------------------------------------------------------- */
 
 #if defined(LMP_HAS_NETCDF)
-
-#include <unistd.h>
 
 #include <cstring>
 #include <netcdf.h>
@@ -183,7 +182,7 @@ DumpNetCDF::DumpNetCDF(LAMMPS *lmp, int narg, char **arg) :
       for (int j = 0; j < DUMP_NC_MAX_DIMS; j++) {
         perat[inc].field[j] = -1;
       }
-      strcpy(perat[inc].name, mangled);
+      strncpy(perat[inc].name, mangled, NC_FIELD_NAME_MAX);
       n_perat++;
     }
 
@@ -286,9 +285,12 @@ void DumpNetCDF::openfile()
   }
 
   if (filewriter) {
-    if (append_flag && !multifile && access(filecurrent, F_OK) != -1) {
+    if (append_flag && !multifile) {
       // Fixme! Perform checks if dimensions and variables conform with
       // data structure standard.
+      if (not utils::file_is_readable(filecurrent))
+        error->all(FLERR, "cannot append to non-existent file {}",
+                                      filecurrent);
 
       if (singlefile_opened) return;
       singlefile_opened = 1;
@@ -512,7 +514,7 @@ void DumpNetCDF::openfile()
       NCERR( nc_put_att_text(ncid, NC_GLOBAL, "program",
                  6, "LAMMPS") );
       NCERR( nc_put_att_text(ncid, NC_GLOBAL, "programVersion",
-                 strlen(universe->version), universe->version) );
+                 strlen(lmp->version), lmp->version) );
 
       // units
       if (!strcmp(update->unit_style, "lj")) {
